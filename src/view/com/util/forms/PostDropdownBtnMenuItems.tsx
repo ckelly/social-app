@@ -43,6 +43,7 @@ import {getMaybeDetachedQuoteEmbed} from '#/state/queries/postgate/util'
 import {useProfileBlockMutationQueue} from '#/state/queries/profile'
 import {useToggleReplyVisibilityMutation} from '#/state/queries/threadgate'
 import {useSession} from '#/state/session'
+import {useComposerControls} from '#/state/shell/composer'
 import {useMergedThreadgateHiddenReplies} from '#/state/threadgate-hidden-replies'
 import {useBreakpoints} from '#/alf'
 import {useDialogControl} from '#/components/Dialog'
@@ -113,6 +114,7 @@ let PostDropdownMenuItems = ({
   const blockPromptControl = useDialogControl()
   const reportDialogControl = useReportDialogControl()
   const deletePromptControl = useDialogControl()
+  const deleteAndRedraftPromptControl = useDialogControl()
   const hidePromptControl = useDialogControl()
   const loggedOutWarningPromptControl = useDialogControl()
   const embedPostControl = useDialogControl()
@@ -123,6 +125,7 @@ let PostDropdownMenuItems = ({
   const {mutateAsync: toggleReplyVisibility} =
     useToggleReplyVisibilityMutation()
 
+  const {openComposer} = useComposerControls()
   const postUri = post.uri
   const postCid = post.cid
   const postAuthor = useProfileShadow(post.author)
@@ -197,6 +200,70 @@ let PostDropdownMenuItems = ({
     )
   }, [
     navigation,
+    postUri,
+    deletePostMutate,
+    postAuthor,
+    currentAccount,
+    isAuthor,
+    href,
+    _,
+  ])
+
+  const onDeleteAndRedraftPost = React.useCallback(() => {
+    // collect post data to re-create draft
+
+    // const recordData = {
+    //   text: record.text,
+    //   embed: record.embed,
+    //   reply: record.reply,
+    // };
+
+    console.log('record', record)
+    console.log('post', post)
+
+    deletePostMutate({uri: postUri}).then(
+      () => {
+        Toast.show(_(msg`Post deleted`))
+
+        let goBack = false
+
+        const route = getCurrentRoute(navigation.getState())
+        if (route.name === 'PostThread') {
+          const params = route.params as CommonNavigatorParams['PostThread']
+          if (
+            currentAccount &&
+            isAuthor &&
+            (params.name === currentAccount.handle ||
+              params.name === currentAccount.did)
+          ) {
+            const currentHref = makeProfileLink(postAuthor, 'post', params.rkey)
+            if (currentHref === href && navigation.canGoBack()) {
+              goBack = true
+            }
+          }
+        }
+
+        // use settimeout to allow for bavigation change if necessary
+        setTimeout(
+          () => {
+            openComposer({
+              text: record.text,
+            })
+          },
+          goBack ? 500 : 0,
+        )
+        if (goBack) navigation.goBack()
+      },
+      e => {
+        logger.error('Failed to delete post', {message: e})
+        Toast.show(_(msg`Failed to delete post, please try again`), 'xmark')
+      },
+    )
+  }, [
+    record,
+    post,
+    navigation,
+    openComposer,
     postUri,
     deletePostMutate,
     postAuthor,
@@ -644,12 +711,32 @@ let PostDropdownMenuItems = ({
                     <Menu.ItemText>{_(msg`Delete post`)}</Menu.ItemText>
                     <Menu.ItemIcon icon={Trash} position="right" />
                   </Menu.Item>
+                  <Menu.Item
+                    testID="postDropdownDeleteRedraftBtn"
+                    label={_(msg`Delete and re-draft post`)}
+                    onPress={() => deleteAndRedraftPromptControl.open()}>
+                    <Menu.ItemText>
+                      {_(msg`Delete and re-draft post`)}
+                    </Menu.ItemText>
+                    <Menu.ItemIcon icon={Trash} position="right" />
+                  </Menu.Item>
                 </>
               )}
             </Menu.Group>
           </>
         )}
       </Menu.Outer>
+
+      <Prompt.Basic
+        control={deleteAndRedraftPromptControl}
+        title={_(msg`Delete and re-draft this post?`)}
+        description={_(
+          msg`If you remove this post, you won't be able to recover it. A new draft post with the same content will be created.`,
+        )}
+        onConfirm={onDeleteAndRedraftPost}
+        confirmButtonCta={_(msg`Delete and Re-draft`)}
+        confirmButtonColor="negative"
+      />
 
       <Prompt.Basic
         control={deletePromptControl}
